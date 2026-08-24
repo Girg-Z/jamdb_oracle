@@ -8,6 +8,17 @@ defmodule Jamdb.Oracle.SQL do
 
   alias Ecto.Migration.{Table, Index, Reference, Constraint}
 
+  @doc false
+  def quote_identifier(name) when is_list(name),
+    do: name |> :binary.list_to_bin() |> quote_identifier()
+  def quote_identifier(name) when is_binary(name) do
+    if Application.get_env(:jamdb_oracle, :quote_identifiers, false) do
+      [?\", escape_identifier(name), ?\"]
+    else
+      name
+    end
+  end
+
   def execute_ddl({command, %Table{} = table, columns}) when command in [:create, :create_if_not_exists] do
     table_name = quote_object(table.prefix, table.name)
     [[if_do(command == :create_if_not_exists, :begin),
@@ -366,8 +377,11 @@ defmodule Jamdb.Oracle.SQL do
   defp quote_object(name) when is_atom(name),
     do: quote_object(Atom.to_string(name))
   defp quote_object(name) do
-    [name]
+    quote_identifier(name)
   end
+
+  defp escape_identifier(value),
+    do: :binary.replace(value, "\"", "\"\"", [:global])
 
   defp intersperse_map(list, separator, mapper, acc \\ [])
   defp intersperse_map([], _separator, _mapper, acc),

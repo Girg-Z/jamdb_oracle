@@ -545,11 +545,14 @@ defmodule Jamdb.Oracle.Query do
   defp returning(fields) do
     returning = Enum.map(fields, &returning_field/1)
     [" RETURN ", intersperse_map(returning, ", ", &quote_name/1),
-     " INTO ", intersperse_map(returning, ", ", &[?: | quote_name(&1)])]
+     " INTO ", intersperse_map(returning, ", ", &[?: | bind_name(&1)])]
   end
 
   defp returning_field({field, _type}), do: field
   defp returning_field(field), do: field
+
+  defp bind_name(name) when is_atom(name), do: Atom.to_string(name)
+  defp bind_name(name), do: name
 
   defp create_names(%{sources: sources}, as_prefix) do
     create_names(sources, 0, tuple_size(sources), as_prefix) |> List.to_tuple()
@@ -611,7 +614,7 @@ defmodule Jamdb.Oracle.Query do
     quote_name(Atom.to_string(name))
   end
   defp quote_name(name) do
-    [name]
+    Jamdb.Oracle.SQL.quote_identifier(name)
   end
 
   defp quote_table(nil, name),    do: quote_table(name)
@@ -620,7 +623,7 @@ defmodule Jamdb.Oracle.Query do
   defp quote_table(name) when is_atom(name),
     do: quote_table(Atom.to_string(name))
   defp quote_table(name) do
-    [name]
+    Jamdb.Oracle.SQL.quote_identifier(name)
   end
 
   defp intersperse_map(list, separator, mapper, acc \\ [])

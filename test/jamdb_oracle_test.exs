@@ -1,5 +1,5 @@
 defmodule Jamdb.OracleTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   import Ecto.Query
 
@@ -844,6 +844,22 @@ defmodule Jamdb.OracleTest do
     assert query == ~s{INSERT INTO prefix.schema VALUES (:1,:2)}
   end
 
+  test "quotes all identifiers in queries when configured" do
+    previous = Application.get_env(:jamdb_oracle, :quote_identifiers)
+    Application.put_env(:jamdb_oracle, :quote_identifiers, true)
+    on_exit(fn -> restore_quote_identifiers(previous) end)
+
+    query = Schema3 |> select([row], row.binary) |> plan()
+
+    assert all(query) == ~s{SELECT s0."binary" FROM "foo"."schema3" s0}
+
+    assert insert(nil, "select", [:from], [[1]], :raise, []) ==
+             ~s{INSERT INTO "select" ("from") VALUES (:1)}
+
+    assert insert(nil, "posts", [:title], [[1]], :raise, [:id]) ==
+             ~s{INSERT INTO "posts" ("title") VALUES (:1) RETURN "id" INTO :id}
+  end
+
   test "insert with typed returning fields" do
     query = insert(nil, "schema", [:x], [[:x]], {:raise, [], []}, [{:id, :id}])
     assert query == ~s{INSERT INTO schema (x) VALUES (:1) RETURN id INTO :id}
@@ -936,6 +952,16 @@ defmodule Jamdb.OracleTest do
       """
       |> remove_newlines
     ]
+  end
+
+  test "quotes all identifiers in DDL when configured" do
+    previous = Application.get_env(:jamdb_oracle, :quote_identifiers)
+    Application.put_env(:jamdb_oracle, :quote_identifiers, true)
+    on_exit(fn -> restore_quote_identifiers(previous) end)
+
+    create = {:create, table(:posts, prefix: :foo), [{:add, :title, :integer, []}]}
+
+    assert execute_ddl(create) == [~s{CREATE TABLE "foo"."posts" ("title" integer)}]
   end
 
   test "create table with prefix" do
@@ -1240,6 +1266,13 @@ defmodule Jamdb.OracleTest do
 
   defp remove_newlines(string) when is_binary(string) do
     string |> String.trim() |> String.replace("\n", " ")
+  end
+
+  defp restore_quote_identifiers(nil) do
+    Application.delete_env(:jamdb_oracle, :quote_identifiers)
+  end
+  defp restore_quote_identifiers(value) do
+    Application.put_env(:jamdb_oracle, :quote_identifiers, value)
   end
 
   defp to_constraints(message) do

@@ -180,6 +180,19 @@ Ecto types              | Oracle types                     | Literal syntax in p
 
 Using quoted identifiers:
 
+To quote every table, prefix, column, index, and constraint identifier generated
+by the adapter, enable:
+
+    config :jamdb_oracle, quote_identifiers: true
+
+The option defaults to `false` for compatibility with existing Oracle schemas.
+Quoted identifiers preserve the configured case, so `"users"` and `"USERS"`
+refer to different objects in Oracle. Keep the same setting when running
+migrations and application queries.
+
+With the option disabled, individual identifiers can still be supplied with
+explicit quotes as in the legacy example below:
+
     defmodule YourApp.Users do
       use Ecto.Schema
 
