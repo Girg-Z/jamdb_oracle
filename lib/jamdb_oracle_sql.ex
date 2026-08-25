@@ -276,6 +276,7 @@ defmodule Jamdb.Oracle.SQL do
   defp ecto_to_db({:map, _}),            do: "json"
   defp ecto_to_db(:map),                 do: "json"
   defp ecto_to_db(:string),              do: "varchar2"
+  defp ecto_to_db(:text),                do: "clob"
   defp ecto_to_db(:time),                do: "date"
   defp ecto_to_db(:time_usec),           do: "date"
   defp ecto_to_db(:naive_datetime),      do: "timestamp"

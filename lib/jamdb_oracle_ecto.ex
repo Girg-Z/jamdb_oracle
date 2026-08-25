@@ -95,8 +95,12 @@ defmodule Ecto.Adapters.Jamdb.Oracle do
 
   @impl true
   def dumpers({:map, _}, type),   do: [&Ecto.Type.embedded_dump(type, &1, :json)]
+  def dumpers(:binary, type),     do: [type, &tag_binary/1]
   def dumpers(:binary_id, type),  do: [type, Ecto.UUID]
   def dumpers(_, type),           do: [type]
+
+  defp tag_binary(nil), do: {:ok, nil}
+  defp tag_binary(value), do: {:ok, %Ecto.Query.Tagged{value: value, type: :binary}}
 
   defp bool_decode("0"), do: {:ok, false}
   defp bool_decode("1"), do: {:ok, true}

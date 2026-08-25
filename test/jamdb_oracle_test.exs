@@ -954,6 +954,12 @@ defmodule Jamdb.OracleTest do
     ]
   end
 
+  test "create table with text column" do
+    create = {:create, table(:posts), [{:add, :body, :text, []}]}
+
+    assert execute_ddl(create) == ["CREATE TABLE posts (body clob)"]
+  end
+
   test "quotes all identifiers in DDL when configured" do
     previous = Application.get_env(:jamdb_oracle, :quote_identifiers)
     Application.put_env(:jamdb_oracle, :quote_identifiers, true)

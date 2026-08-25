@@ -6,6 +6,7 @@ deps
 erl_crash.dump
 ebin
 _build/
+logs/
 test/jamdb_oracle_test.hrl
 config/test.exs
 rel/example_project
