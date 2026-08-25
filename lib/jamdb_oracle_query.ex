@@ -527,8 +527,25 @@ defmodule Jamdb.Oracle.Query do
   end
 
   defp interval(datetime, literal, count, interval, sources, query) do
-    [?(, expr(datetime, sources, query), literal, " INTERVAL '", 
-         expr(count, sources, query), "' ", interval, ?)]
+    [?(, expr(datetime, sources, query), literal,
+     interval_expr(count, interval, sources, query), ?)]
+  end
+
+  defp interval_expr(count, interval, sources, query) when interval in ["year", "month"] do
+    ["NUMTOYMINTERVAL(", expr(count, sources, query), ", '", String.upcase(interval), "')"]
+  end
+  defp interval_expr(count, "week", sources, query) do
+    ["NUMTODSINTERVAL(", expr(count, sources, query), " * 7, 'DAY')"]
+  end
+  defp interval_expr(count, interval, sources, query)
+    when interval in ["day", "hour", "minute", "second"] do
+    ["NUMTODSINTERVAL(", expr(count, sources, query), ", '", String.upcase(interval), "')"]
+  end
+  defp interval_expr(count, "millisecond", sources, query) do
+    ["NUMTODSINTERVAL(", expr(count, sources, query), " / 1000, 'SECOND')"]
+  end
+  defp interval_expr(count, "microsecond", sources, query) do
+    ["NUMTODSINTERVAL(", expr(count, sources, query), " / 1000000, 'SECOND')"]
   end
 
   defp maybe_paren({op, _, [_, _]} = expr, sources, query) when op in @binary_ops,

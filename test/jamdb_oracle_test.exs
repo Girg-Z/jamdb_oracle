@@ -500,10 +500,35 @@ defmodule Jamdb.OracleTest do
 
   test "datetime_add" do
     query = "schema" |> where([s], datetime_add(s.foo, 1, "month") > s.bar) |> select([], true) |> plan()
-    assert all(query) == ~s{SELECT 1 FROM schema s0 WHERE ((s0.foo +  INTERVAL '1' month) > s0.bar)}
+    assert all(query) == ~s{SELECT 1 FROM schema s0 WHERE ((s0.foo + NUMTOYMINTERVAL(1, 'MONTH')) > s0.bar)}
 
     query = "schema" |> where([s], datetime_add(type(s.foo, :string), 1, "month") > s.bar) |> select([], true) |> plan()
-    assert all(query) == ~s{SELECT 1 FROM schema s0 WHERE ((CAST(s0.foo AS varchar2(2000)) +  INTERVAL '1' month) > s0.bar)}
+    assert all(query) == ~s{SELECT 1 FROM schema s0 WHERE ((CAST(s0.foo AS varchar2(2000)) + NUMTOYMINTERVAL(1, 'MONTH')) > s0.bar)}
+  end
+
+  test "parameterized datetime intervals" do
+    units = [
+      {"year", "NUMTOYMINTERVAL(:1, 'YEAR')"},
+      {"month", "NUMTOYMINTERVAL(:1, 'MONTH')"},
+      {"week", "NUMTODSINTERVAL(:1 * 7, 'DAY')"},
+      {"day", "NUMTODSINTERVAL(:1, 'DAY')"},
+      {"hour", "NUMTODSINTERVAL(:1, 'HOUR')"},
+      {"minute", "NUMTODSINTERVAL(:1, 'MINUTE')"},
+      {"second", "NUMTODSINTERVAL(:1, 'SECOND')"},
+      {"millisecond", "NUMTODSINTERVAL(:1 / 1000, 'SECOND')"},
+      {"microsecond", "NUMTODSINTERVAL(:1 / 1000000, 'SECOND')"}
+    ]
+
+    for {unit, expected_interval} <- units do
+      query =
+        "schema"
+        |> where([s], datetime_add(s.foo, ^5, ^unit) > s.bar)
+        |> select([], true)
+        |> plan()
+
+      assert all(query) ==
+               "SELECT 1 FROM schema s0 WHERE ((s0.foo + #{expected_interval}) > s0.bar)"
+    end
   end
 
   test "tagged type" do
