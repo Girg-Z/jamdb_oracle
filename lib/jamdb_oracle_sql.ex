@@ -319,8 +319,35 @@ defmodule Jamdb.Oracle.SQL do
 
   defp match_or_nil(regex, s, f) do
     case Regex.run(regex, s) do
-      [_, m] -> f.(m)
+      [_, m] -> f.(constraint_name(m))
       nil -> nil
+    end
+  end
+
+  # Oracle reports constraint names qualified with their owner, e.g.
+  # `SCHEMA.UQ_NAME`. Ecto expects the bare name, as created by the
+  # migration: without `quote_identifiers` Oracle uppercased the name, so it
+  # is downcased back; with it the name keeps its case. Error messages are
+  # `inspect`ed charlists, hence the `\"` unescaping.
+  defp constraint_name(name) do
+    name = :binary.replace(name, "\\\"", "\"", [:global])
+
+    name =
+      case Regex.run(~r/\A(?:"(?:[^"]|"")*"|[^".]*)\.(.+)\z/s, name) do
+        [_, bare] -> bare
+        nil -> name
+      end
+
+    name =
+      case Regex.run(~r/\A"((?:[^"]|"")*)"\z/s, name) do
+        [_, quoted] -> :binary.replace(quoted, "\"\"", "\"", [:global])
+        nil -> name
+      end
+
+    if Application.get_env(:jamdb_oracle, :quote_identifiers, false) do
+      name
+    else
+      String.downcase(name)
     end
   end
 

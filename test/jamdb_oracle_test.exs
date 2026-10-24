@@ -1324,10 +1324,42 @@ defmodule Jamdb.OracleTest do
     Jamdb.Oracle.SQL.to_constraints(%DBConnection.ConnectionError{message: message}, [])
   end
 
-  test "to_constraints" do
-    assert to_constraints("'ORA-00001: unique constraint (PREFIX.SUFFIX) violated\\n'") == [unique: "PREFIX.SUFFIX"]
-    assert to_constraints("'ORA-02292: integrity constraint (PREFIX.SUFFIX) violated - child record found\\n'") == [foreign_key: "PREFIX.SUFFIX"]
-    assert to_constraints("'ORA-02291: integrity constraint (PREFIX.SUFFIX) violated - parent key not found\\n'") == [foreign_key: "PREFIX.SUFFIX"]
-    assert to_constraints("'ORA-02290: check constraint (PREFIX.SUFFIX) violated\\n'") == [check: "PREFIX.SUFFIX"]
+  test "to_constraints strips the owner and downcases unquoted names" do
+    previous = Application.get_env(:jamdb_oracle, :quote_identifiers)
+    Application.delete_env(:jamdb_oracle, :quote_identifiers)
+    on_exit(fn -> restore_quote_identifiers(previous) end)
+
+    assert to_constraints("'ORA-00001: unique constraint (PREFIX.SUFFIX) violated\\n'") == [unique: "suffix"]
+    assert to_constraints("'ORA-02292: integrity constraint (PREFIX.SUFFIX) violated - child record found\\n'") == [foreign_key: "suffix"]
+    assert to_constraints("'ORA-02291: integrity constraint (PREFIX.SUFFIX) violated - parent key not found\\n'") == [foreign_key: "suffix"]
+    assert to_constraints("'ORA-02290: check constraint (PREFIX.SUFFIX) violated\\n'") == [check: "suffix"]
+
+    assert to_constraints(
+             ~S|~c"ORA-00001: unique constraint (APP.UQ_EMBEDDING_MODELS) violated on table APP.EMBEDDING_MODELS columns (NAME)\nORA-03301: (ORA-00001 details) row with column values (NAME:'x') already exists\n"|
+           ) == [unique: "uq_embedding_models"]
+
+    assert to_constraints(~S|~c"ORA-00001: unique constraint (APP.USERS_PKEY) violated on table APP.USERS columns (ID)\n"|) ==
+             [unique: "users_pkey"]
+
+    assert to_constraints(~S|~c"ORA-00001: unique constraint (UQ_X) violated\n"|) == [unique: "uq_x"]
+    assert to_constraints(~S|~c"ORA-00001: unique constraint (\"APP\".\"UQ_X\") violated\n"|) == [unique: "uq_x"]
+    assert to_constraints(~S|~c"ORA-01400: cannot insert NULL into (\"APP\".\"T\".\"C\")\n"|) == []
+  end
+
+  test "to_constraints strips the owner and keeps the case of quoted names" do
+    previous = Application.get_env(:jamdb_oracle, :quote_identifiers)
+    Application.put_env(:jamdb_oracle, :quote_identifiers, true)
+    on_exit(fn -> restore_quote_identifiers(previous) end)
+
+    assert to_constraints(
+             ~S|~c"ORA-00001: unique constraint (APP.uq_Mixed) violated on table APP.t columns (x)\nORA-03301: (ORA-00001 details) row with column values (x:1) already exists\n"|
+           ) == [unique: "uq_Mixed"]
+
+    assert to_constraints(~S|~c"ORA-00001: unique constraint (APP.uq.dotted) violated\n"|) == [unique: "uq.dotted"]
+    assert to_constraints(~S|~c"ORA-02292: integrity constraint (APP.fk_x) violated - child record found\n"|) == [foreign_key: "fk_x"]
+    assert to_constraints(~S|~c"ORA-02291: integrity constraint (APP.fk_x) violated - parent key not found\n"|) == [foreign_key: "fk_x"]
+    assert to_constraints(~S|~c"ORA-02290: check constraint (APP.ck_x) violated\n"|) == [check: "ck_x"]
+    assert to_constraints(~S|~c"ORA-02290: check constraint (APP.\"ck_x\") violated\n"|) == [check: "ck_x"]
+    assert to_constraints(~S|~c"ORA-02290: check constraint (\"APP\".\"ck_\"\"q\") violated\n"|) == [check: ~S(ck_"q)]
   end
 end
