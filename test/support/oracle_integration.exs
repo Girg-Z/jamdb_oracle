@@ -29,3 +29,11 @@ end
 defmodule Jamdb.Oracle.Integration.Repo do
   use Ecto.Repo, otp_app: :jamdb_oracle, adapter: Ecto.Adapters.Jamdb.Oracle
 end
+
+defmodule Jamdb.Oracle.Integration.OtherRepo do
+  use Ecto.Repo, otp_app: :jamdb_oracle, adapter: Ecto.Adapters.Jamdb.Oracle
+end
+
+defmodule Jamdb.Oracle.Integration.SandboxRepo do
+  use Ecto.Repo, otp_app: :jamdb_oracle, adapter: Ecto.Adapters.Jamdb.Oracle
+end

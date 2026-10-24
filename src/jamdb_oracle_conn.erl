@@ -112,8 +112,11 @@ sql_query(#oraclient{conn_state=connected, timeouts={_Tout, ReadTout}} = State, 
         "SESSION" -> sql_query(State, {?ENCODER:encode_helper(sess, []), [], [], []});
         "COMMIT" -> handle_req(tran, State, ?TTI_COMMIT);
         "ROLLBACK" -> handle_req(tran, State, ?TTI_ROLLBACK);
-        "COMON" -> handle_req(tran, State#oraclient{auto=1}, ?TTI_COMON);
-        "COMOFF" -> handle_req(tran, State#oraclient{auto=0}, ?TTI_COMOFF);
+        %% Autocommit is the commit-on-success option sent with each execute;
+        %% the legacy TTI_COMON/TTI_COMOFF calls fail on recent servers
+        %% (ORA-03154), so only the client-side flag is switched.
+        "COMON" -> {ok, [], State#oraclient{auto=1}};
+        "COMOFF" -> {ok, [], State#oraclient{auto=0}};
         "PING" -> handle_req(tran, State, ?TTI_PING);
         "STOP" -> handle_req(stop, State, hd(Bind));
         "START" -> handle_req(spfp, State, []), handle_req(start, State, hd(Bind));

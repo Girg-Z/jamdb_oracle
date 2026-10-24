@@ -65,7 +65,9 @@ configuration:
 
 ### Connection parameters
 
-  * `:autocommit` - Mode that issued an automatic COMMIT operation
+  * `:autocommit` - Commit every statement executed outside a transaction, defaults to `1`.
+    Inside `Repo.transaction/2` autocommit is always off until COMMIT / ROLLBACK.
+    Note that Oracle implicitly commits DDL statements, also inside a transaction.
   * `:fetch` - Number of rows to fetch from the server
   * `:sdu` - Size of session data unit
   * `:read_timeout` - Read timeout while reading from the socket, defaults to `500`

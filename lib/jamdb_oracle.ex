@@ -12,7 +12,7 @@ defmodule Jamdb.Oracle do
   @timeout 15_000
   @idle_interval 5_000
 
-  defstruct [:pid, :mode, :cursors, :timeout, :idle_interval]
+  defstruct [:pid, :mode, :cursors, :timeout, :idle_interval, autocommit: 1]
 
   @doc """
   Starts and links to a database connection process.
@@ -89,7 +89,9 @@ defmodule Jamdb.Oracle do
     params = opts[:parameters] || []
     sock_opts = opts[:socket_options] || []
     case :jamdb_oracle.start_link(sock_opts ++ params ++ env) do
-      {:ok, pid} -> {:ok, %Jamdb.Oracle{pid: pid, mode: :idle, timeout: timeout, idle_interval: idle_interval}}
+      {:ok, pid} ->
+        {:ok, %Jamdb.Oracle{pid: pid, mode: :idle, timeout: timeout, idle_interval: idle_interval,
+          autocommit: Keyword.get(params, :autocommit, 1)}}
       {:error, err} -> {:error, error!(err)}
     end
   end
@@ -129,17 +131,31 @@ defmodule Jamdb.Oracle do
     {:ok, query, %{s | timeout: timeout}}
   end
 
+  # Transactions
+  #
+  # Outside a transaction every statement is committed by the server (the
+  # `:autocommit` connection parameter, on by default). A transaction turns
+  # autocommit off on the connection, so nothing is committed until COMMIT and
+  # ROLLBACK discards everything done since BEGIN; autocommit is restored
+  # afterwards. Savepoints (`mode: :savepoint`, used by Ecto's SQL sandbox) map
+  # to SAVEPOINT / ROLLBACK TO; Oracle has no RELEASE SAVEPOINT, so releasing
+  # one is a no-op. Note that DDL statements implicitly commit in Oracle, also
+  # inside a transaction.
+
   @impl true
   def handle_begin(opts, %{mode: mode} = s) do
     case Keyword.get(opts, :mode, :transaction) do
       :transaction when mode == :idle ->
-        statement = "SAVEPOINT tran"
-        handle_transaction(statement, opts, %{s | mode: :transaction})
+        case autocommit(s, :off) do
+          {:ok, result, s} -> {:ok, result, %{s | mode: :transaction}}
+          other -> other
+        end
       :savepoint when mode == :transaction ->
         statement = "SAVEPOINT " <> Keyword.get(opts, :name, "svpt")
-        handle_transaction(statement, opts, %{s | mode: :transaction})
-      status when status in [:transaction, :savepoint] ->
-        {status, s}
+        handle_transaction(statement, opts, s)
+      _status ->
+        # report the actual transaction status of the connection
+        {mode, s}
     end
   end
 
@@ -147,12 +163,12 @@ defmodule Jamdb.Oracle do
   def handle_commit(opts, %{mode: mode} = s) do
     case Keyword.get(opts, :mode, :transaction) do
       :transaction when mode == :transaction ->
-        statement = "COMMIT"
-        handle_transaction(statement, opts, %{s | mode: :idle})
+        end_transaction("COMMIT", opts, s)
       :savepoint when mode == :transaction ->
-        {:ok, [], %{s | mode: :transaction}}
-      status when status in [:transaction, :savepoint] ->
-        {status, s}
+        {:ok, [], s}
+      _status ->
+        # report the actual transaction status of the connection
+        {mode, s}
     end
   end
 
@@ -160,15 +176,35 @@ defmodule Jamdb.Oracle do
   def handle_rollback(opts, %{mode: mode} = s) do
     case Keyword.get(opts, :mode, :transaction) do
       :transaction when mode in [:transaction, :error] ->
-        statement = "ROLLBACK TO tran"
-        handle_transaction(statement, opts, %{s | mode: :idle})
+        end_transaction("ROLLBACK", opts, s)
       :savepoint when mode in [:transaction, :error] ->
         statement = "ROLLBACK TO " <> Keyword.get(opts, :name, "svpt")
         handle_transaction(statement, opts, %{s | mode: :transaction})
-      status when status in [:transaction, :savepoint] ->
-        {status, s}
+      _status ->
+        # report the actual transaction status of the connection
+        {mode, s}
     end
   end
+
+  # COMMIT or ROLLBACK ends the transaction even when it fails (Oracle rolls
+  # back a transaction whose commit fails), so autocommit is restored anyway.
+  defp end_transaction(statement, opts, s) do
+    case handle_transaction(statement, opts, s) do
+      {:disconnect, _err, _s} = disconnect ->
+        disconnect
+      {status, result, s} ->
+        case autocommit(%{s | mode: :idle}, :on) do
+          {:ok, _, s} -> {status, result, s}
+          other -> other
+        end
+    end
+  end
+
+  # The driver commands COMOFF / COMON switch the commit-on-execute flag of
+  # the connection; nothing to do when autocommit was disabled in the config.
+  defp autocommit(%{autocommit: 0} = s, _), do: {:ok, [], s}
+  defp autocommit(s, :off), do: handle_transaction("COMOFF", [], s)
+  defp autocommit(s, :on), do: handle_transaction("COMON", [], s)
 
   defp handle_transaction(statement, _opts, s) do
     case query(s, statement |> Jamdb.Oracle.to_list) do
