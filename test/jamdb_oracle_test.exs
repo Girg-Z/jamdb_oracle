@@ -979,6 +979,20 @@ defmodule Jamdb.OracleTest do
     ]
   end
 
+  test "create table with unconstrained decimal columns" do
+    create =
+      {:create, table(:posts),
+       [
+         {:add, :price, :decimal, []},
+         {:add, :ratio, :numeric, []},
+         {:add, :amount, :decimal, [precision: 10, scale: 2]}
+       ]}
+
+    assert execute_ddl(create) == [
+             "CREATE TABLE posts (price number, ratio number, amount decimal(10,2))"
+           ]
+  end
+
   test "create table with text column" do
     create = {:create, table(:posts), [{:add, :body, :text, []}]}
 

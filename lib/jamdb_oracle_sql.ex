@@ -247,6 +247,7 @@ defmodule Jamdb.Oracle.SQL do
     cond do
       size               -> [type_name, ?(, to_string(size), ?)]
       precision          -> [type_name, ?(, to_string(precision), ?,, to_string(scale || 0), ?)]
+      type in [:decimal, :numeric] -> "number"
       type == :boolean   -> [type_name, "(1)"]
       type == :binary    -> [type_name, "(2000)"]
       type == :string    -> [type_name, "(2000)"]
