@@ -91,6 +91,7 @@ defmodule Ecto.Adapters.Jamdb.Oracle do
   def loaders(:float, type),      do: [&float_decode/1, type]
   def loaders(:boolean, type),    do: [&bool_decode/1, type]
   def loaders(:binary_id, type),  do: [Ecto.UUID, type]
+  def loaders(:date, type),       do: [&date_decode/1, type]
   def loaders(_, type),           do: [type]
 
   @impl true
@@ -107,6 +108,11 @@ defmodule Ecto.Adapters.Jamdb.Oracle do
   defp bool_decode(0), do: {:ok, false}
   defp bool_decode(1), do: {:ok, true}
   defp bool_decode(x), do: {:ok, x}
+
+  # Oracle DATE always has a time part and is returned as a NaiveDateTime.
+  defp date_decode(%NaiveDateTime{} = datetime), do: {:ok, NaiveDateTime.to_date(datetime)}
+  defp date_decode(%DateTime{} = datetime), do: {:ok, DateTime.to_date(datetime)}
+  defp date_decode(x), do: {:ok, x}
 
   defp float_decode(%Decimal{} = decimal), do: {:ok, Decimal.to_float(decimal)}
   defp float_decode(x), do: {:ok, x}
