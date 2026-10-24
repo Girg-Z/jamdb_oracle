@@ -255,7 +255,11 @@ send_req(fetch, #oraclient{seq=Task} = State, Cursor) ->
 send_req(exec, #oraclient{charset=Charset,fetch=Fetch,cursors=Cursors,seq=Task} = State, {Query, Bind, Batch}) ->
     {Select, Change, Bind2} = handle_bind(Query, Bind),
     {Type, Fetch2} = get_param(type, {Select, Change, [B || {out, B} <- Bind2], Fetch}),
-    Sum = erlang:crc32(?ENCODER:encode_str(Query)),
+    %% Cached cursors keep the bind metadata of their first execution, so the
+    %% bind types are part of the key: a statement executed with other types
+    %% (e.g. NULL, then RAW) gets its own cursor instead of misread values.
+    BindMeta = << <<(?ENCODER:encode_token(oac, get_param(data, B), #format{charset=Charset}))/binary>> || B <- Bind2 >>,
+    Sum = erlang:crc32(erlang:crc32(?ENCODER:encode_str(Query)), BindMeta),
     DefCol = get_param(defcols, {Sum, Cursors}),
     {LCursor, Cursor} = get_param(defcols, DefCol),
     Pig = if Cursor =/= 0 -> get_record(pig, [], {?TTI_CANA, [Cursor]}, Task); true -> <<>> end,

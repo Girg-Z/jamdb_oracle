@@ -249,8 +249,8 @@ encode_record(exec, #oraclient{type=Type,auto=Auto,charset=Charset,fetch=Fetch,r
     (encode_array(All8))/binary,
     (case {BindLen, DefLen, QueryLen} of
         {0, 0, QueryLen} -> <<>>;
-        {BindLen, 0, 0} -> encode_token(rxd, [Bind|Batch], <<>>);
-        {BindLen, 0, QueryLen} -> encode_token(rxd, [Bind|Batch], encode_token(oac, Bind, #format{charset=Charset}, <<>>));
+        {BindLen, 0, 0} -> encode_token(rxd, encode_rows(Type, [Bind|Batch]), <<>>);
+        {BindLen, 0, QueryLen} -> encode_token(rxd, encode_rows(Type, [Bind|Batch]), encode_token(oac, Bind, #format{charset=Charset}, <<>>));
         {0, DefLen, 0} -> encode_token(oac, Def, #format{charset=Charset}, <<>>)
     end)/binary
     >>;
@@ -267,6 +267,27 @@ encode_record(close, #oraclient{seq=Tseq}) ->
     ?TTI_FUN,
     ?TTI_LOGOFF, Tseq
     >>.
+
+%% In SQL statements the server expects the values of LONG / LONG RAW binds
+%% (declared length above 4000) after all the other values of a row, while the
+%% bind metadata (oac) keeps the statement order. PL/SQL blocks take them as is.
+encode_rows(block, Rows) ->
+    Rows;
+encode_rows(_Type, [Bind|_] = Rows) ->
+    Mask = [long_bind(Data) || Data <- Bind],
+    case lists:member(true, Mask) of
+        false -> Rows;
+        true -> [long_last(Mask, Row) || Row <- Rows]
+    end.
+
+long_last(Mask, Row) ->
+    Pairs = lists:zip(Mask, Row),
+    [Data || {false, Data} <- Pairs] ++ [Data || {true, Data} <- Pairs].
+
+long_bind(Data) when is_binary(Data) -> byte_size(Data) =:= 0 orelse byte_size(Data) > 4000;
+long_bind(Data) when is_list(Data) -> setopts(size, Data) > 4000;
+long_bind(clob) -> true;
+long_bind(_Data) -> false.
 
 setopts(all8, {Opts, Fetch, Type}) -> [Opts,Fetch,0,0,0,0,0,Type,0,0,0,0,0];
 setopts(size, Data) when length(Data) > 4000 -> 33554432;  %clob
@@ -306,6 +327,8 @@ encode_token(rxd, [Data|Rest], Acc) ->
     encode_token(rxd, Rest, <<Acc/binary, (encode_token(Data, <<?TTI_RXD>>))/binary>>);
 encode_token(oac, Data, #format{charset=Charset}) when is_list(Data) ->
     encode_token(oac, ?TNS_TYPE_VARCHAR, setopts(size, Data), 16, Charset, 0);
+encode_token(oac, Data, _) when is_binary(Data), byte_size(Data) > 0, byte_size(Data) =< 4000 ->
+    encode_token(oac, ?TNS_TYPE_RAW, 4000, 0, 0, 0);
 encode_token(oac, Data, _) when is_binary(Data) ->
     encode_token(oac, ?TNS_TYPE_LONGRAW, 33554432, 0, 0, 0);
 encode_token(oac, Data, _) when is_number(Data) -> encode_token(oac, ?TNS_TYPE_NUMBER, 22, 0, 0, 0);
