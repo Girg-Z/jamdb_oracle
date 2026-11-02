@@ -154,6 +154,10 @@ decode_token(rxh, Data, {Cursor, RowFormat, Rows}) ->
     end,
     F = decode_next(rxh,Data),
     decode_two_task(F, {Cursor, RowFormat, Bvc, Rows});
+%% Some cursors (e.g. SELECT ... FOR UPDATE) send a row header before every
+%% row, so a header can follow rows already decoded in the same response.
+decode_token(rxh, Data, {Cursor, RowFormat, _Bvc, Rows}) ->
+    decode_token(rxh, Data, {Cursor, RowFormat, Rows});
 decode_token(iov, Data, {Cursor, RowFormat, Type}) when is_atom(Type) ->
     A = decode_next(ub1,Data),
     Num = decode_ub2(A),
