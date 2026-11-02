@@ -18,6 +18,18 @@ defmodule Jamdb.Oracle.Integration do
     |> Keyword.merge(extra)
   end
 
+  # Runs fun with repo started outside the test supervisor (e.g. in on_exit)
+  # and stops it before returning, so the next module can start it again.
+  def with_repo(repo, fun) do
+    {:ok, pid} = repo.start_link(config())
+
+    try do
+      fun.()
+    after
+      Supervisor.stop(pid)
+    end
+  end
+
   def drop_table(repo, table) do
     repo.query!(
       "BEGIN EXECUTE IMMEDIATE 'DROP TABLE #{table}'; " <>

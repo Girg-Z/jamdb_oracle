@@ -26,9 +26,10 @@ defmodule Jamdb.Oracle.Integration.TransactionTest do
     Repo.query!("CREATE TABLE jamdb_it_tx (id NUMBER(19) PRIMARY KEY, name VARCHAR2(50))")
 
     on_exit(fn ->
-      {:ok, _} = Repo.start_link(Integration.config())
-      Integration.drop_table(Repo, "jamdb_it_tx")
-      Integration.drop_table(Repo, "jamdb_it_tx_ddl")
+      Integration.with_repo(Repo, fn ->
+        Integration.drop_table(Repo, "jamdb_it_tx")
+        Integration.drop_table(Repo, "jamdb_it_tx_ddl")
+      end)
     end)
 
     :ok

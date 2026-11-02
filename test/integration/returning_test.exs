@@ -25,8 +25,9 @@ defmodule Jamdb.Oracle.Integration.ReturningTest do
     )
 
     on_exit(fn ->
-      {:ok, _} = Repo.start_link(Integration.config())
-      Integration.drop_table(Repo, "jamdb_it_returning")
+      Integration.with_repo(Repo, fn ->
+        Integration.drop_table(Repo, "jamdb_it_returning")
+      end)
     end)
 
     :ok

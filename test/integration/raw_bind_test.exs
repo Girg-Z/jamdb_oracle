@@ -36,9 +36,10 @@ defmodule Jamdb.Oracle.Integration.RawBindTest do
     """)
 
     on_exit(fn ->
-      {:ok, _} = Repo.start_link(Integration.config())
-      Integration.drop_table(Repo, "jamdb_it_raw")
-      Integration.drop_table(Repo, "jamdb_it_raw_tokens")
+      Integration.with_repo(Repo, fn ->
+        Integration.drop_table(Repo, "jamdb_it_raw")
+        Integration.drop_table(Repo, "jamdb_it_raw_tokens")
+      end)
     end)
 
     :ok

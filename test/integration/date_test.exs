@@ -32,8 +32,9 @@ defmodule Jamdb.Oracle.Integration.DateTest do
     Repo.query!(IO.iodata_to_binary(ddl))
 
     on_exit(fn ->
-      {:ok, _} = Repo.start_link(Integration.config())
-      Integration.drop_table(Repo, "jamdb_it_date")
+      Integration.with_repo(Repo, fn ->
+        Integration.drop_table(Repo, "jamdb_it_date")
+      end)
     end)
 
     :ok
