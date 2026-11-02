@@ -36,6 +36,8 @@ defmodule Ecto.Adapters.Jamdb.Oracle do
   @doc false
   def returning_options(opts, _schema_meta, []), do: opts
   def returning_options(opts, schema_meta, returning) do
+    opts = Keyword.put(opts, :out_rows, true)
+
     if Keyword.has_key?(opts, :out) do
       opts
     else

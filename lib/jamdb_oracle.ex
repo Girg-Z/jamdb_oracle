@@ -106,6 +106,18 @@ defmodule Jamdb.Oracle do
     :ok
   end
 
+  # Out binds come back as one list per bind, each holding a value for every
+  # affected row. Ecto expects one list per row, so transpose when asked to.
+  defp out_rows(%{rows: [_ | _] = columns} = result, opts) do
+    if Keyword.get(opts, :out_rows, false) do
+      rows = Enum.zip_with(columns, & &1)
+      %{result | num_rows: length(rows), rows: rows}
+    else
+      result
+    end
+  end
+  defp out_rows(result, _opts), do: result
+
   @impl true
   def handle_execute(%{batch: true} = query, params, _opts, s) do
     %Jamdb.Oracle.Query{statement: statement} = query
@@ -119,7 +131,7 @@ defmodule Jamdb.Oracle do
     %Jamdb.Oracle.Query{statement: statement} = query
     returning = Enum.map(Keyword.get(opts, :out, []), fn elem -> {:out, elem} end)
     case query(s, statement |> Jamdb.Oracle.to_list, Enum.concat(params, returning)) do
-      {:ok, result} -> {:ok, query, result, s}
+      {:ok, result} -> {:ok, query, out_rows(result, opts), s}
       {:error, err} -> {:error, error!(err), s}
       {:disconnect, err} -> {:disconnect, error!(err), s}
     end

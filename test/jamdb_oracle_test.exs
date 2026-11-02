@@ -893,13 +893,19 @@ defmodule Jamdb.OracleTest do
   test "infers output bind types for Ecto returning fields" do
     schema_meta = %{schema: Schema}
 
-    assert Ecto.Adapters.Jamdb.Oracle.returning_options([], schema_meta, [:id, :x, :w]) ==
-      [out: [:integer, :integer, :decimal]]
-    assert Ecto.Adapters.Jamdb.Oracle.returning_options([out: [:number]], schema_meta, [:id]) ==
-      [out: [:number]]
-    assert Ecto.Adapters.Jamdb.Oracle.returning_options([], %{schema: nil},
-      [{:id, :id}, {:name, :string}, {:uuid, :binary_id}]) ==
-      [out: [:integer, :string, :binary]]
+    opts = Ecto.Adapters.Jamdb.Oracle.returning_options([], schema_meta, [:id, :x, :w])
+    assert opts[:out] == [:integer, :integer, :decimal]
+    assert opts[:out_rows]
+
+    opts = Ecto.Adapters.Jamdb.Oracle.returning_options([out: [:number]], schema_meta, [:id])
+    assert opts[:out] == [:number]
+    assert opts[:out_rows]
+
+    opts = Ecto.Adapters.Jamdb.Oracle.returning_options([], %{schema: nil},
+      [{:id, :id}, {:name, :string}, {:uuid, :binary_id}])
+    assert opts[:out] == [:integer, :string, :binary]
+
+    assert Ecto.Adapters.Jamdb.Oracle.returning_options([], schema_meta, []) == []
   end
 
   test "insert with query as rows" do
