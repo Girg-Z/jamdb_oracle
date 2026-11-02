@@ -256,7 +256,7 @@ defmodule Jamdb.OracleTest do
                ~s{INNER JOIN tree t1 ON t1.id = s0.category_id}
   end
 
-  test "CTE update_all" do
+  test "CTE update_all is not supported" do
     cte_query =
       from(x in Schema, order_by: [asc: :id], limit: 10, select: %{id: x.id})
 
@@ -264,19 +264,26 @@ defmodule Jamdb.OracleTest do
       Schema
       |> with_cte("target_rows", as: ^cte_query)
       |> join(:inner, [row], target in "target_rows", on: target.id == row.id)
-      |> select([r, t], r)
       |> update(set: [x: 123])
       |> plan(:update_all)
 
-    assert update_all(query) ==
-      ~s{UPDATE (WITH target_rows AS } <>
-      ~s{(SELECT ss0.id id FROM schema ss0 ORDER BY ss0.id FETCH NEXT 10 ROWS ONLY) } <>
-      ~s{SELECT s0.id, s0.x, s0.y, s0.z, s0.w FROM schema s0 INNER JOIN target_rows t1 ON t1.id = s0.id) } <>
-      ~s{SET x = 123}
-    ## RETURN s0.id, s0.x, s0.y, s0.z, s0.w INTO :id, :x, :y, :z, :w	  
+    assert_raise Ecto.QueryError, ~r/joins are not supported in update_all/, fn ->
+      update_all(query)
+    end
+
+    query =
+      Schema
+      |> with_cte("target_rows", as: ^cte_query)
+      |> where([row], row.id in subquery(from t in "target_rows", select: t.id))
+      |> update(set: [x: 123])
+      |> plan(:update_all)
+
+    assert_raise Ecto.QueryError, ~r/CTEs are not supported in update_all/, fn ->
+      update_all(query)
+    end
   end
 
-  test "CTE delete_all" do
+  test "CTE delete_all is not supported" do
     cte_query =
       from(x in Schema, order_by: [asc: :id], limit: 10, select: %{id: x.id})
 
@@ -284,14 +291,21 @@ defmodule Jamdb.OracleTest do
       Schema
       |> with_cte("target_rows", as: ^cte_query)
       |> join(:inner, [row], target in "target_rows", on: target.id == row.id)
-      |> select([r, t], r)
       |> plan(:delete_all)
 
-    assert delete_all(query) ==
-      ~s{DELETE FROM (WITH target_rows AS } <>
-      ~s{(SELECT ss0.id id FROM schema ss0 ORDER BY ss0.id FETCH NEXT 10 ROWS ONLY) } <>
-      ~s{SELECT s0.id, s0.x, s0.y, s0.z, s0.w FROM schema s0 INNER JOIN target_rows t1 ON t1.id = s0.id)}
-    ## RETURN s0.id, s0.x, s0.y, s0.z, s0.w INTO :id, :x, :y, :z, :w	  
+    assert_raise Ecto.QueryError, ~r/joins are not supported in delete_all/, fn ->
+      delete_all(query)
+    end
+
+    query =
+      Schema
+      |> with_cte("target_rows", as: ^cte_query)
+      |> where([row], row.id in subquery(from t in "target_rows", select: t.id))
+      |> plan(:delete_all)
+
+    assert_raise Ecto.QueryError, ~r/CTEs are not supported in delete_all/, fn ->
+      delete_all(query)
+    end
   end
 
   test "select" do
@@ -640,16 +654,12 @@ defmodule Jamdb.OracleTest do
            ~s{UPDATE schema s0 SET x = :1}
   end
 
-  test "update all with returning" do
+  test "update all with returning is not supported" do
     query = from(m in Schema, update: [set: [x: 0]]) |> select([m], m) |> plan(:update_all)
-    assert update_all(query) ==
-           ~s{UPDATE (SELECT s0.id, s0.x, s0.y, s0.z, s0.w FROM schema s0) SET x = 0}
-    ##  RETURN s0.id, s0.x, s0.y, s0.z, s0.w INTO :id, :x, :y, :z, :w
 
-    query = from(m in Schema, update: [set: [x: ^1]]) |> where([m], m.x == ^2) |> select([m], {m.x, m.y}) |> plan(:update_all)
-    assert update_all(query) ==
-           ~s{UPDATE (SELECT s0.x, s0.y FROM schema s0 WHERE (s0.x = :2)) SET x = :1}
-    ##  RETURN s0.x, s0.y INTO :x, :y
+    assert_raise Ecto.QueryError, ~r/:select is not supported in update_all/, fn ->
+      update_all(query)
+    end
   end
 
   test "update all with prefix" do
@@ -676,14 +686,28 @@ defmodule Jamdb.OracleTest do
     assert delete_all(query) == ~s{DELETE FROM schema s0 WHERE (s0.x = 123)}
   end
 
-  test "delete all with returning" do
-    query = Schema |> Queryable.to_query |> select([m], m) |> plan()
-    assert delete_all(query) == ~s{DELETE FROM (SELECT s0.id, s0.x, s0.y, s0.z, s0.w FROM schema s0)}
-    ## RETURN s0.id, s0.x, s0.y, s0.z, s0.w INTO :id, :x, :y, :z, :w
-
+  test "delete all with returning is not supported" do
     query = from(e in Schema, where: e.x == 123) |> select([e], e.y) |> plan()
-    assert delete_all(query) == ~s{DELETE FROM (SELECT s0.y FROM schema s0 WHERE (s0.x = 123))}
-    ## RETURN s0.y INTO :y
+
+    assert_raise Ecto.QueryError, ~r/:select is not supported in delete_all/, fn ->
+      delete_all(query)
+    end
+  end
+
+  test "update all and delete all with joins are not supported" do
+    query =
+      from(m in Schema, join: c in Schema2, on: c.z == m.x, update: [set: [x: 0]])
+      |> plan(:update_all)
+
+    assert_raise Ecto.QueryError, ~r/joins are not supported in update_all/, fn ->
+      update_all(query)
+    end
+
+    query = from(m in Schema, join: c in Schema2, on: c.z == m.x) |> plan(:delete_all)
+
+    assert_raise Ecto.QueryError, ~r/joins are not supported in delete_all/, fn ->
+      delete_all(query)
+    end
   end
 
   test "delete all with prefix" do

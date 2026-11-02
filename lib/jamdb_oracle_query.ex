@@ -34,40 +34,43 @@ defmodule Jamdb.Oracle.Query do
   end
 
   @doc false
-  def update_all(%{from: %{source: source}, select: select} = query) do
+  def update_all(%{from: %{source: source}} = query) do
+    unsupported_all!(query, :update_all)
     sources = create_names(query, [])
 
-    cte = cte(query, sources)
-    using_join(query, :update_all, cte)
-
-    {rows, where} =
-      if select do
-        {[?(, all(query), ?)], []}
-      else
-        {from, name} = get_source(query, sources, 0, source)
-        {[from, ?\s, name], where(%{query | wheres: query.wheres}, sources)}
-      end
+    {from, name} = get_source(query, sources, 0, source)
     fields = update_fields(query, sources)
 
-    ["UPDATE ", rows, " SET ", fields, where]
+    ["UPDATE ", from, ?\s, name, " SET ", fields | where(query, sources)]
   end
 
   @doc false
-  def delete_all(%{from: from, select: select} = query) do
+  def delete_all(%{from: %{source: source}} = query) do
+    unsupported_all!(query, :delete_all)
     sources = create_names(query, [])
 
-    cte = cte(query, sources)
-    using_join(query, :delete_all, cte)
+    {from, name} = get_source(query, sources, 0, source)
 
-    {rows, where} =
-      if select do
-        {[?(, all(query), ?)], []}
-      else
-        {from, name} = get_source(query, sources, 0, from)
-        {[from, ?\s, name], where(%{query | wheres: query.wheres}, sources)}
-      end
+    ["DELETE FROM ", from, ?\s, name | where(query, sources)]
+  end
 
-    ["DELETE FROM ", rows, where]
+  # Oracle returns DML results only through typed out binds and has no
+  # UPDATE ... FROM or DELETE ... USING, so refuse these instead of
+  # generating SQL that would silently do something else.
+  defp unsupported_all!(%{select: select, joins: joins, with_ctes: ctes} = query, kind) do
+    cond do
+      select != nil ->
+        error!(query, ":select is not supported in #{kind} by Oracle")
+
+      joins != [] ->
+        error!(query, "joins are not supported in #{kind} by Oracle")
+
+      match?(%WithExpr{queries: [_ | _]}, ctes) ->
+        error!(query, "CTEs are not supported in #{kind} by Oracle")
+
+      true ->
+        :ok
+    end
   end
 
   @doc false
@@ -235,12 +238,6 @@ defmodule Jamdb.Oracle.Query do
   defp update_op(command, _key, _value, _sources, query) do
     error!(query, "unknown update operation #{inspect command}")
   end
-
-  defp using_join(%{joins: []}, _kind, []), do: []
-  defp using_join(%{joins: _} = query, _kind, []) do
-    error!(query, "update_all/delete_all joins are not supported")
-  end
-  defp using_join(%{joins: _}, _kind, _), do: []
 
   defp join(%{joins: []}, _sources), do: []
   defp join(%{joins: joins} = query, sources) do

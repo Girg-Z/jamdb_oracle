@@ -3,6 +3,8 @@ defmodule Jamdb.Oracle.Integration.ReturningTest do
 
   @moduletag :oracle
 
+  import Ecto.Query
+
   alias Jamdb.Oracle.Integration
   alias Jamdb.Oracle.Integration.Repo
 
@@ -56,5 +58,33 @@ defmodule Jamdb.Oracle.Integration.ReturningTest do
                [],
                out: [:integer, :integer]
              )
+  end
+
+  test "update_all and delete_all with select raise before reaching the database" do
+    item = Repo.insert!(%Item{name: "c", qty: 7})
+    query = from(i in Item, where: i.id == ^item.id, select: i.qty)
+
+    assert_raise Ecto.QueryError, ~r/:select is not supported in update_all/, fn ->
+      Repo.update_all(query, set: [qty: 8])
+    end
+
+    assert_raise Ecto.QueryError, ~r/:select is not supported in delete_all/, fn ->
+      Repo.delete_all(query)
+    end
+
+    assert %Item{qty: 7} = Repo.get!(Item, item.id)
+    assert {1, nil} = Repo.update_all(from(i in Item, where: i.id == ^item.id), set: [qty: 8])
+    assert %Item{qty: 8} = Repo.get!(Item, item.id)
+  end
+
+  test "FOR UPDATE returns every locked row" do
+    for n <- 1..3, do: Repo.insert!(%Item{name: "lock", qty: n})
+    query = from(i in Item, where: i.name == "lock", order_by: i.qty, select: i.qty)
+
+    assert {:ok, [1, 2, 3]} =
+             Repo.transaction(fn -> query |> lock("FOR UPDATE") |> Repo.all() end)
+
+    assert {:ok, [1, 2, 3]} =
+             Repo.transaction(fn -> query |> lock("FOR UPDATE SKIP LOCKED") |> Repo.all() end)
   end
 end
