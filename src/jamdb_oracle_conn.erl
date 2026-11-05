@@ -133,11 +133,10 @@ loop(Values) ->
 %% internal
 handle_login(#oraclient{socket=Socket, env=Env, sdu=Length, timeouts=Touts} = State) ->
     case recv(Socket, Length, Touts) of
+        {partial, Data} ->
+            handle_login(Data, State);
         {ok, ?TNS_DATA, Data} ->
-            case handle_token(Data, State) of
-                {ok, State2} -> handle_login(State2);
-                State2 -> {ok, State2}                  %connected
-            end;
+            handle_login(Data, State);
         {ok, ?TNS_RESEND, _Data} ->
             {ok, Socket2} = sock_renegotiate(Socket, Env, Touts),
             {ok, State2} = send_req(login, State#oraclient{socket=Socket2}),
@@ -155,6 +154,12 @@ handle_login(#oraclient{socket=Socket, env=Env, sdu=Length, timeouts=Touts} = St
             handle_error(local, binary_to_list(Rest), State);
         {error, Type, Reason} ->
             handle_error(Type, Reason, State)
+    end.
+
+handle_login(Data, State) ->
+    case handle_token(Data, State) of
+        {ok, State2} -> handle_login(State2);
+        State2 -> {ok, State2}                  %connected
     end.
 
 handle_token(<<Token, Data/binary>>, State) ->
@@ -276,6 +281,8 @@ handle_resp(Acc, #oraclient{socket=Socket, sdu=Length, timeouts=Touts} = State) 
     case recv(Socket, Length, Touts) of
         {ok, ?TNS_DATA, Data} ->
             handle_resp(Data, Acc, State);
+        {partial, _Data} = Partial ->
+            handle_resp(Partial, Acc, State);
         {ok, ?TNS_MARKER, _Data} ->
             handle_req(marker, State, Acc);
         {error, Type, Reason} ->
@@ -283,7 +290,9 @@ handle_resp(Acc, #oraclient{socket=Socket, sdu=Length, timeouts=Touts} = State) 
     end.
 
 handle_resp(Data, Acc, #oraclient{type=Type, cursors=Cursors} = State) ->
-    case ?DECODER:decode_two_task(Data, Acc) of
+    case decode_resp(Data, Acc, State) of
+        {recv_error, ErrType, Reason} ->
+            handle_error(ErrType, Reason, State);
         {0, _RowNumber, Cursor, {LCursor, RowFormat}, []} when Type =/= change, RowFormat =/= [] ->
             Type2 = if LCursor =:= Cursor -> Type; true -> cursor end,
             {ok, State2} = send_req(fetch, State, {Cursor, RowFormat}),
@@ -318,6 +327,22 @@ handle_resp(Data, Acc, #oraclient{type=Type, cursors=Cursors} = State) ->
         {error, Reason} ->
             handle_error(remote, Reason, State)
     end.
+
+%% A response is only guessed complete when read_timeout expires after a full
+%% packet; a slow server can still be sending it. If such a response does not
+%% decode, wait for the rest within the call timeout and decode it again.
+decode_resp({partial, Data}, Acc, #oraclient{socket=Socket, sdu=Length, timeouts=Touts} = State) ->
+    try ?DECODER:decode_two_task(Data, Acc)
+    catch
+        error:_ ->
+            case recv_rest(Socket, Length, Touts, <<>>, Data) of
+                {ok, _PacketType, Data2} -> decode_resp(Data2, Acc, State);
+                {partial, _Data2} = Partial -> decode_resp(Partial, Acc, State);
+                {error, ErrType, Reason} -> {recv_error, ErrType, Reason}
+            end
+    end;
+decode_resp(Data, Acc, _State) ->
+    ?DECODER:decode_two_task(Data, Acc).
 
 get_result(cursor, 0, _RowNumber, _RowFormat, _Rows) ->
     more;
@@ -440,8 +465,20 @@ recv(read_timeout, Socket, Length, {_Tout, ReadTout} = Touts, Acc, Data) ->
     case sock_recv(Socket, 0, ReadTout) of
         {ok, NetworkData} ->
             recv(Socket, Length, Touts, <<Acc/bits, NetworkData/bits>>, Data);
-        {error, timeout} ->
+        {error, timeout} when Data =:= <<>> ->
             {ok, ?TNS_DATA, Data};
+        {error, timeout} ->
+            {partial, Data};
+        {error, Reason} ->
+            {error, socket, Reason}
+    end.
+
+%% Waits for the rest of a response within the call timeout; Acc holds the
+%% bytes of a packet that has not been fully received yet.
+recv_rest(Socket, Length, {Tout, _ReadTout} = Touts, Acc, Data) ->
+    case sock_recv(Socket, 0, Tout) of
+        {ok, NetworkData} ->
+            recv(Socket, Length, Touts, <<Acc/bits, NetworkData/bits>>, Data);
         {error, Reason} ->
             {error, socket, Reason}
     end.
@@ -459,5 +496,6 @@ recv(Socket, Length, Touts, Acc, Data) ->
         {more, _Type, PacketBody, Rest} ->
             recv(Socket, Length, Touts, Rest, <<Data/bits, PacketBody/bits>>);
         {error, more} ->
-            recv(read_timeout, Socket, Length, Touts, Acc, Data)
+            %% the server is still sending this packet
+            recv_rest(Socket, Length, Touts, Acc, Data)
     end.
