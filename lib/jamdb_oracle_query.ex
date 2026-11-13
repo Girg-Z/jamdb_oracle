@@ -477,6 +477,22 @@ defmodule Jamdb.Oracle.Query do
 
   defp expr({:count, _, []}, _sources, _query), do: "count(*)"
 
+  # JSON_VALUE returns a scalar as VARCHAR2, so a number or boolean literal
+  # is compared with the typed scalar instead of being converted implicitly
+  # (which raises ORA-01722 on rows where the value is not numeric).
+  defp expr({op, _, [{:json_extract_path, _, [json, path]}, right]}, sources, query)
+       when op in [:==, :!=, :<, :>, :<=, :>=] and
+              (is_number(right) or is_boolean(right)) do
+    {:binary_op, str} = handle_call(op, 2)
+    returning = if is_number(right), do: " RETURNING NUMBER", else: []
+    right = if is_boolean(right), do: ["'", to_string(right), "'"], else: expr(right, sources, query)
+    [json_value(json, path, returning, sources, query), str | right]
+  end
+
+  defp expr({:json_extract_path, _, [json, path]}, sources, query) do
+    json_value(json, path, [], sources, query)
+  end
+
   defp expr({fun, _, args}, sources, query) when is_atom(fun) and is_list(args) do
     {modifier, args} =
       case args do
@@ -521,6 +537,36 @@ defmodule Jamdb.Oracle.Query do
 
   defp expr(literal, _sources, _query) when is_float(literal) do
     Float.to_string(literal)
+  end
+
+  # Ecto's json_extract_path (`field["a"][0]`) becomes JSON_VALUE, which
+  # returns the scalar at the path and NULL for missing keys, JSON null,
+  # objects and arrays.
+  defp json_value(json, [], _returning, sources, query), do: expr(json, sources, query)
+
+  defp json_value(json, path, returning, sources, query) do
+    steps =
+      Enum.map(path, fn
+        key when is_binary(key) ->
+          [?., ?", escape_string(escape_json_key(key)), ?"]
+
+        index when is_integer(index) and index >= 0 ->
+          [?[, Integer.to_string(index), ?]]
+
+        index when is_integer(index) ->
+          error!(query, "negative array indexes are not supported in json_extract_path, got: #{index}")
+
+        _ ->
+          error!(query, "references to source fields inside of json_extract_path are not supported")
+      end)
+
+    ["JSON_VALUE(", expr(json, sources, query), ", '$", steps, ?', returning, ?)]
+  end
+
+  defp escape_json_key(key) do
+    key
+    |> :binary.replace("\\", "\\\\", [:global])
+    |> :binary.replace("\"", "\\\"", [:global])
   end
 
   defp interval(datetime, literal, count, interval, sources, query) do

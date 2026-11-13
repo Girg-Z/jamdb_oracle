@@ -49,6 +49,14 @@ defmodule Jamdb.OracleTest do
     end
   end
 
+  defmodule JsonSchema do
+    use Ecto.Schema
+
+    schema "json_schema" do
+      field :meta, :map
+    end
+  end
+
   defp plan(query, operation \\ :all) do
     Ecto.Adapter.Queryable.plan_query(operation, Jamdb.Oracle, query) |> elem(0)
   end
@@ -376,6 +384,48 @@ defmodule Jamdb.OracleTest do
 
     assert all(query) ==
              ~s{SELECT s0.x FROM schema s0 WHERE (s0.x = 42) AND (s0.y != 43)}
+  end
+
+  test "json_extract_path" do
+    query = JsonSchema |> select([s], s.meta["a"]["b"]) |> plan()
+    assert all(query) == ~s{SELECT JSON_VALUE(j0.meta, '$."a"."b"') FROM json_schema j0}
+
+    query = JsonSchema |> select([s], s.meta["tags"][0]) |> plan()
+    assert all(query) == ~s{SELECT JSON_VALUE(j0.meta, '$."tags"[0]') FROM json_schema j0}
+
+    query = JsonSchema |> select([s], json_extract_path(s.meta, ^["a", 1])) |> plan()
+    assert all(query) == ~s{SELECT JSON_VALUE(j0.meta, '$."a"[1]') FROM json_schema j0}
+
+    query = JsonSchema |> select([s], s.meta["it's \"q\" \\"]) |> plan()
+    assert all(query) == ~s{SELECT JSON_VALUE(j0.meta, '$."it''s \\"q\\" \\\\"') FROM json_schema j0}
+
+    query = JsonSchema |> select([s], json_extract_path(s.meta, [])) |> plan()
+    assert all(query) == ~s{SELECT j0.meta FROM json_schema j0}
+  end
+
+  test "json_extract_path in where" do
+    query = JsonSchema |> where([s], s.meta["kind"] == "single") |> select([s], s.id) |> plan()
+    assert all(query) == ~s{SELECT j0.id FROM json_schema j0 WHERE (JSON_VALUE(j0.meta, '$."kind"') = 'single')}
+
+    query = JsonSchema |> where([s], s.meta["kind"] == ^"single") |> select([s], s.id) |> plan()
+    assert all(query) == ~s{SELECT j0.id FROM json_schema j0 WHERE (JSON_VALUE(j0.meta, '$."kind"') = :1)}
+
+    query = JsonSchema |> where([s], s.meta["n"] > 5) |> select([s], s.id) |> plan()
+    assert all(query) == ~s{SELECT j0.id FROM json_schema j0 WHERE (JSON_VALUE(j0.meta, '$."n"' RETURNING NUMBER) > 5)}
+
+    query = JsonSchema |> where([s], s.meta["ok"] == true) |> select([s], s.id) |> plan()
+    assert all(query) == ~s{SELECT j0.id FROM json_schema j0 WHERE (JSON_VALUE(j0.meta, '$."ok"') = 'true')}
+
+    query = JsonSchema |> where([s], is_nil(s.meta["a"]["b"])) |> select([s], s.id) |> plan()
+    assert all(query) == ~s{SELECT j0.id FROM json_schema j0 WHERE (JSON_VALUE(j0.meta, '$."a"."b"') IS NULL)}
+  end
+
+  test "json_extract_path rejects field references and negative indexes" do
+    query = JsonSchema |> select([s], s.meta[s.id]) |> plan()
+    assert_raise Ecto.QueryError, ~r/references to source fields/, fn -> all(query) end
+
+    query = JsonSchema |> select([s], json_extract_path(s.meta, ^["tags", -1])) |> plan()
+    assert_raise Ecto.QueryError, ~r/negative array indexes/, fn -> all(query) end
   end
 
   test "or_where" do
