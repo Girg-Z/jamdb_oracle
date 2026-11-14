@@ -390,7 +390,7 @@ get_param(format, {out, Data}, Format) -> get_param(out, ?ENCODER:encode_helper(
 get_param(format, {in, Data}, Format) -> get_param(in, Data, Format);
 get_param(format, Data, Format) -> get_param(in, Data, Format);
 get_param(Type, Data, Format) when is_atom(Type) ->
-    {<<>>, DataType, Length, Scale, Charset} = ?DECODER:decode_helper(param, Data, Format),
+    {<<>>, DataType, Length, Scale, Charset, _Precision} = ?DECODER:decode_helper(param, Data, Format),
     #format{param=Type,data_type=DataType,data_length=Length,data_scale=Scale,charset=Charset}.
 
 get_param(defcols, {Sum, Cursors}) when is_pid(Cursors) ->

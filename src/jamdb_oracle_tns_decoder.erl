@@ -59,6 +59,7 @@ decode_token(oac, Data) ->
     DataType = decode_ub1(Data),
     A = decode_next(ub1,Data),     %data type
     B = decode_next(ub1,A),        %flags
+    Precision = decode_ub1(B),
     C = decode_next(ub1,B),        %precision
     Scale = decode_ub2(C),
     D = decode_next(ub2,C),        %data scale
@@ -72,7 +73,7 @@ decode_token(oac, Data) ->
     L = decode_next(ub2,K),        %character set id
     M = decode_next(ub1,L),        %character set form
     N = decode_next(ub4,M),        %mxlc
-    {N, DataType, Length, Scale, Charset};
+    {N, DataType, Length, Scale, Charset, Precision};
 decode_token(dcb, Data) ->
     A = decode_next(ub4,Data),
     Num = decode_ub4(A),
@@ -126,7 +127,7 @@ decode_token(dcb, Data, {_Cursor, _RowFormat, Type}) when is_atom(Type) ->
 decode_token(uds, Data, {RowFormat, 0}) ->
     {lists:reverse(RowFormat), Data};
 decode_token(uds, Data, {RowFormat, Num}) ->
-    {A, DataType, Length, Scale, Charset} = decode_token(oac, Data),
+    {A, DataType, Length, Scale, Charset, Precision} = decode_token(oac, Data),
     B = decode_next(ub1,A),        %nulls allowed
     C = decode_next(ub1,B),        %v7 length of name
     Column = decode_dalc(C),
@@ -136,7 +137,8 @@ decode_token(uds, Data, {RowFormat, Num}) ->
     G = decode_next(ub2,F),        %column position
     J = decode_next(ub4,G),
     decode_token(uds, J, {[#format{column_name=list_to_binary(Column),
-    data_type=DataType,data_length=Length,data_scale=Scale,charset=Charset}|RowFormat], Num-1});
+    data_type=DataType,data_length=Length,data_scale=Scale,charset=Charset,
+    data_precision=Precision}|RowFormat], Num-1});
 decode_token(rxh, Data, {Cursor, RowFormat, Type}) when is_atom(Type) ->
     A = decode_next(rxh,Data),
     decode_two_task(A, {Cursor, RowFormat, [0], []});
@@ -412,9 +414,10 @@ decode_data(Data, #format{data_type=DataType, charset=Charset}=ValueFormat)
     {binary_to_list(unicode:characters_to_binary(list_to_binary(Value), utf16)), RestData};
 decode_data(Data, #format{data_type=DataType}) when ?IS_CHAR_TYPE(DataType); ?IS_RAW_TYPE(DataType) ->
     {decode_value(Data, DataType), decode_next(chr,Data)};
-decode_data(Data, #format{data_type=DataType, data_scale=Scale}) when ?IS_NUMBER_TYPE(DataType) ->
+decode_data(Data, #format{data_type=DataType, data_scale=Scale, data_precision=Precision})
+    when ?IS_NUMBER_TYPE(DataType) ->
     <<Length, Bin:Length/binary, Rest/binary>> = Data,
-    {{lsc(decode_number(Bin), Scale)}, Rest};
+    {{lsc(decode_number(Bin), Scale, Precision)}, Rest};
 decode_data(Data, #format{data_type=DataType}) when ?IS_FIXED_TYPE(DataType) ->
     <<Length, Bin:Length/binary, Rest/binary>> = Data,
     {decode_value(Bin, DataType), Rest};
@@ -551,9 +554,16 @@ lnxfmt([I|L]) when I band 128 =:= 0 ->
 lnxfmt([I|L]) ->
     {1, [((I band 127) - 65)|[ N-1 || N <- L]]}.
 
-lsc(I, 0) when I-trunc(I) =:= +0.0 -> trunc(I);
-lsc(I, 0) -> I;
-lsc(I, _S) -> I / 1.
+% Scale -127 with precision 0 is an unconstrained NUMBER: a NUMBER column
+% without precision, or an expression such as count(*) once Oracle wraps it
+% in a subquery (FETCH NEXT, ROWNUM). Integral values come back as integers,
+% like NUMBER(p,0); FLOAT columns report a binary precision and stay floats.
+lsc(I, 0, _P) when I-trunc(I) =:= +0.0 -> trunc(I);
+lsc(I, 0, _P) -> I;
+lsc(I, -127, 0) when is_integer(I) -> I;
+lsc(I, -127, 0) when I == trunc(I) -> trunc(I);
+lsc(I, -127, 0) -> I;
+lsc(I, _S, _P) -> I / 1.
 
 decode_binary(<<I,_Rest/binary>> = Data) when I band 128 =:= 0 ->
     Length = byte_size(Data),

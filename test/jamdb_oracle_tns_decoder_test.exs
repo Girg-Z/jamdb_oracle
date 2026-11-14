@@ -8,7 +8,7 @@ defmodule JamdbOracleTnsDecoderTest do
 
   # SELECT ... FOR UPDATE responses repeat the row header before every row.
   test "row headers between rows keep the rows already decoded" do
-    row_format = [{:format, "ID", :in, 2, 22, -127, 0}]
+    row_format = [{:format, "ID", :in, 2, 22, -127, 0, 126}]
     # flag, num requests, iter num, num iters, buffer length, bit vector, rxhrid
     row_header = <<@tti_rxh, 0, 0, 0, 0, 0, 0, 0>>
     row = fn number -> <<@tti_rxd, 2, 193, number + 1>> end

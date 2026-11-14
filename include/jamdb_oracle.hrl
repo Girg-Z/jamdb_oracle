@@ -67,7 +67,8 @@
     data_type,
     data_length,
     data_scale,
-    charset
+    charset,
+    data_precision
 }).
 
 -define(IS_FIXED_TYPE(DataType),
