@@ -59,4 +59,27 @@ defmodule Jamdb.Oracle.Integration.DateTest do
 
     assert %Validity{valid_from: ~D[2026-05-06], valid_to: %Date{}} = Repo.get!(Validity, 2)
   end
+  test "values/2 rows join and group by date" do
+    Repo.insert_all(Validity, [
+      %{id: 10, valid_from: ~D[2026-07-01], valid_to: ~D[2026-07-02]},
+      %{id: 11, valid_from: ~D[2026-07-02], valid_to: ~D[2026-07-03]}
+    ])
+
+    days = for i <- 0..3, do: %{day: Date.add(~D[2026-07-01], i), label: "d#{i}"}
+
+    query =
+      from d in values(days, %{day: :date, label: :string}),
+        left_join: v in Validity,
+        on: v.id in [10, 11] and v.valid_from <= d.day and v.valid_to >= d.day,
+        group_by: [d.day, d.label],
+        order_by: d.day,
+        select: {d.day, d.label, count(v.id)}
+
+    assert Repo.all(query) == [
+             {~D[2026-07-01], "d0", 1},
+             {~D[2026-07-02], "d1", 2},
+             {~D[2026-07-03], "d2", 1},
+             {~D[2026-07-04], "d3", 0}
+           ]
+  end
 end

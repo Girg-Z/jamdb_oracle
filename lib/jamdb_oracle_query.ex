@@ -425,6 +425,23 @@ defmodule Jamdb.Oracle.Query do
     [?(, all(query, subquery_as_prefix(sources)), ?)]
   end
 
+  # Oracle has no VALUES table constructor before 23ai, so build the rows
+  # as a UNION ALL of single-row selects from dual. get_source/4 adds the
+  # surrounding parentheses.
+  defp expr({:values, _, [types, idx, num_rows]}, _sources, _query) do
+    {rows, _idx} =
+      Enum.map_reduce(1..num_rows//1, idx + 1, fn _, idx ->
+        {cols, idx} =
+          Enum.map_reduce(types, idx, fn {field, type}, idx ->
+            {[values_bind(idx, type), ?\s | quote_name(field)], idx + 1}
+          end)
+
+        {["SELECT ", Enum.intersperse(cols, ", "), " FROM dual"], idx}
+      end)
+
+    Enum.intersperse(rows, " UNION ALL ")
+  end
+
   defp expr({:fragment, _, [kw]}, _sources, query) when is_list(kw) or tuple_size(kw) == 3 do
     error!(query, "keyword or interpolated fragments are not supported")
   end
@@ -635,6 +652,9 @@ defmodule Jamdb.Oracle.Query do
       {:fragment, _, _} ->
         {nil, as_prefix ++ [?f | Integer.to_string(pos)], nil}
 
+      {:values, _, _} ->
+        {nil, as_prefix ++ [?v | Integer.to_string(pos)], nil}
+
       {table, schema, prefix} ->
         name = as_prefix ++ [create_alias(table) | Integer.to_string(pos)]
         {quote_table(prefix, table), name, schema}
@@ -643,6 +663,13 @@ defmodule Jamdb.Oracle.Query do
         {nil, as_prefix ++ [?s | Integer.to_string(pos)], nil}
     end
   end
+
+  # to_db_type/1 maps strings and binaries to varchar2(2000) and raw(2000),
+  # and CAST to those silently truncates longer values, so leave them uncast.
+  defp values_bind(idx, type) when type in [:string, :binary],
+    do: [?: | Integer.to_string(idx)]
+  defp values_bind(idx, type),
+    do: ["CAST(:", Integer.to_string(idx), " AS ", Jamdb.Oracle.SQL.to_db_type(type), ?)]
 
   defp create_alias(<<first, _rest::binary>>) when first in ?a..?z when first in ?A..?Z do
     <<first>>

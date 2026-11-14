@@ -115,6 +115,36 @@ defmodule Jamdb.OracleTest do
     assert all(query) == ~s{SELECT s0.* FROM schema s0}
   end
 
+  test "from values" do
+    rows = [%{day: ~D[2026-11-12], n: 1, s: "a"}, %{day: ~D[2026-11-13], n: 2, s: "b"}]
+    types = %{day: :date, n: :integer, s: :string}
+
+    query =
+      from(v in values(rows, types),
+        join: p in "posts", on: p.day == v.day,
+        where: v.n > ^0,
+        select: {v.day, v.n, v.s, p.id})
+      |> plan()
+
+    assert all(query) ==
+             ~s{SELECT v0.day, v0.n, v0.s, p1.id FROM (} <>
+               ~s{SELECT :1 s, CAST(:2 AS date) day, CAST(:3 AS integer) n FROM dual UNION ALL } <>
+               ~s{SELECT :4 s, CAST(:5 AS date) day, CAST(:6 AS integer) n FROM dual) v0 } <>
+               ~s{INNER JOIN posts p1 ON p1.day = v0.day WHERE (v0.n > :7)}
+
+    query =
+      from(p in "posts",
+        join: v in values(rows, types), on: p.day == v.day,
+        select: v.n)
+      |> plan()
+
+    assert all(query) ==
+             ~s{SELECT v1.n FROM posts p0 INNER JOIN (} <>
+               ~s{SELECT :1 s, CAST(:2 AS date) day, CAST(:3 AS integer) n FROM dual UNION ALL } <>
+               ~s{SELECT :4 s, CAST(:5 AS date) day, CAST(:6 AS integer) n FROM dual) v1 } <>
+               ~s{ON p0.day = v1.day}
+  end
+
   test "from with subquery" do
     query = subquery("posts" |> select([r], %{x: r.x, y: r.y})) |> select([r], r.x) |> plan()
 
