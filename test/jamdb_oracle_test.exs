@@ -128,8 +128,8 @@ defmodule Jamdb.OracleTest do
 
     assert all(query) ==
              ~s{SELECT v0.day, v0.n, v0.s, p1.id FROM (} <>
-               ~s{SELECT :1 s, CAST(:2 AS date) day, CAST(:3 AS integer) n FROM dual UNION ALL } <>
-               ~s{SELECT :4 s, CAST(:5 AS date) day, CAST(:6 AS integer) n FROM dual) v0 } <>
+               ~s{SELECT TO_CHAR(:1) s, CAST(:2 AS date) day, CAST(:3 AS integer) n FROM dual UNION ALL } <>
+               ~s{SELECT TO_CHAR(:4) s, CAST(:5 AS date) day, CAST(:6 AS integer) n FROM dual) v0 } <>
                ~s{INNER JOIN posts p1 ON p1.day = v0.day WHERE (v0.n > :7)}
 
     query =
@@ -140,8 +140,8 @@ defmodule Jamdb.OracleTest do
 
     assert all(query) ==
              ~s{SELECT v1.n FROM posts p0 INNER JOIN (} <>
-               ~s{SELECT :1 s, CAST(:2 AS date) day, CAST(:3 AS integer) n FROM dual UNION ALL } <>
-               ~s{SELECT :4 s, CAST(:5 AS date) day, CAST(:6 AS integer) n FROM dual) v1 } <>
+               ~s{SELECT TO_CHAR(:1) s, CAST(:2 AS date) day, CAST(:3 AS integer) n FROM dual UNION ALL } <>
+               ~s{SELECT TO_CHAR(:4) s, CAST(:5 AS date) day, CAST(:6 AS integer) n FROM dual) v1 } <>
                ~s{ON p0.day = v1.day}
   end
 
@@ -597,7 +597,7 @@ defmodule Jamdb.OracleTest do
     assert all(query) == ~s{SELECT 1 FROM schema s0 WHERE ((s0.foo + NUMTOYMINTERVAL(1, 'MONTH')) > s0.bar)}
 
     query = "schema" |> where([s], datetime_add(type(s.foo, :string), 1, "month") > s.bar) |> select([], true) |> plan()
-    assert all(query) == ~s{SELECT 1 FROM schema s0 WHERE ((CAST(s0.foo AS varchar2(2000)) + NUMTOYMINTERVAL(1, 'MONTH')) > s0.bar)}
+    assert all(query) == ~s{SELECT 1 FROM schema s0 WHERE ((TO_CHAR(s0.foo) + NUMTOYMINTERVAL(1, 'MONTH')) > s0.bar)}
   end
 
   test "parameterized datetime intervals" do

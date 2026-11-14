@@ -536,6 +536,11 @@ defmodule Jamdb.Oracle.Query do
     when type in ~w(binary_id uuid)a  do
     ["HEXTORAW(", expr(literal, sources, query), ?)]
   end
+  # CAST needs a VARCHAR2 length and silently truncates to it; TO_CHAR has
+  # no length and raises if the value exceeds the VARCHAR2 maximum.
+  defp expr(%Ecto.Query.Tagged{value: literal, type: :string}, sources, query) do
+    ["TO_CHAR(", expr(literal, sources, query), ?)]
+  end
   defp expr(%Ecto.Query.Tagged{value: literal, type: type}, sources, query) do
     ["CAST(", expr(literal, sources, query), " AS ", Jamdb.Oracle.SQL.to_db_type(type), ?)]
   end
@@ -664,9 +669,10 @@ defmodule Jamdb.Oracle.Query do
     end
   end
 
-  # to_db_type/1 maps strings and binaries to varchar2(2000) and raw(2000),
-  # and CAST to those silently truncates longer values, so leave them uncast.
-  defp values_bind(idx, type) when type in [:string, :binary],
+  # Same as type/2: TO_CHAR for strings, and binaries need no conversion.
+  defp values_bind(idx, :string),
+    do: ["TO_CHAR(:", Integer.to_string(idx), ?)]
+  defp values_bind(idx, :binary),
     do: [?: | Integer.to_string(idx)]
   defp values_bind(idx, type),
     do: ["CAST(:", Integer.to_string(idx), " AS ", Jamdb.Oracle.SQL.to_db_type(type), ?)]
